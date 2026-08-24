@@ -7,16 +7,15 @@ set -euo pipefail
 
 echo "== pulse bootstrap =="
 
-for cmd in python3 pip3; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "Missing required command: $cmd" >&2
-    exit 1
-  fi
-done
+PYTHON_BIN="$(command -v python3.12 || command -v python3 || true)"
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Missing required command: python3.12 or python3" >&2
+  exit 1
+fi
 
 if [[ ! -d ".venv" ]]; then
-  echo "Creating virtualenv..."
-  python3 -m venv .venv
+  echo "Creating virtualenv with $PYTHON_BIN..."
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 # shellcheck disable=SC1091

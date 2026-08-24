@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+      POSTGRES_DB: pulse
+    ports:
+      - "5433:5432"
+    volumes:
+      - pulse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        SERVICE: api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://pulse:pulse@db:5432/pulse
+      CHECKER_URL: http://checker:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  checker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        SERVICE: checker
+    environment:
+      DATABASE_URL: postgresql+psycopg2://pulse:pulse@db:5432/pulse
+    ports:
+      - "8001:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        SERVICE: scheduler
+    environment:
+      DATABASE_URL: postgresql+psycopg2://pulse:pulse@db:5432/pulse
+      CHECKER_URL: http://checker:8001
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      checker:
+        condition: service_started
+
+volumes:
+  pulse-db-data:
