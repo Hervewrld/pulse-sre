@@ -26,6 +26,14 @@ class MonitorOut(BaseModel):
     last_checked_at: datetime.datetime | None
 
 
+class UptimeOut(BaseModel):
+    monitor_id: int
+    window_hours: float
+    total_checks: int
+    successful_checks: int
+    uptime_percentage: float | None
+
+
 class CheckResultOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

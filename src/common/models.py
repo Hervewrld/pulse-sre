@@ -28,6 +28,21 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def to_naive_utc(value: datetime.datetime) -> datetime.datetime:
+    """Strips tzinfo after converting to UTC.
+
+    SQLite drops tzinfo on timezone-aware columns when it round-trips a row through the
+    database, so an aware value compared against it in a WHERE clause won't match as
+    expected. Postgres's timestamptz columns store an absolute instant regardless of
+    the parameter's tzinfo, so a naive-but-UTC value compares correctly there too -
+    using it everywhere keeps queries portable across both.
+    """
+    if value.tzinfo is not None:
+        value = value.astimezone(datetime.timezone.utc)
+        return value.replace(tzinfo=None)
+    return value
+
+
 class Monitor(Base):
     __tablename__ = "monitors"
 
