@@ -1,14 +1,16 @@
+import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.schemas import CheckResultOut, MonitorCreate, MonitorOut
+from src.api.queries import compute_uptime
+from src.api.schemas import CheckResultOut, MonitorCreate, MonitorOut, UptimeOut
 from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
-from src.common.models import CheckResult, Monitor
+from src.common.models import CheckResult, Monitor, utcnow
 
 logger = setup_logging("api", settings.log_level)
 
@@ -86,3 +88,25 @@ def get_monitor_history(monitor_id: int, limit: int = 100, session: Session = De
         .limit(limit)
     ).all()
     return results
+
+
+@app.get("/monitors/{monitor_id}/uptime", response_model=UptimeOut)
+def get_monitor_uptime(
+    monitor_id: int,
+    hours: float = Query(default=24.0, gt=0),
+    session: Session = Depends(get_db),
+):
+    monitor = session.get(Monitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status_code=404, detail="monitor not found")
+
+    since = utcnow() - datetime.timedelta(hours=hours)
+    total, successful, percentage = compute_uptime(session, monitor_id, since)
+
+    return UptimeOut(
+        monitor_id=monitor_id,
+        window_hours=hours,
+        total_checks=total,
+        successful_checks=successful,
+        uptime_percentage=percentage,
+    )
