@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pulse</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262b36;
+    --text: #e6e8eb;
+    --muted: #8b93a1;
+    --up: #2ecc71;
+    --down: #e74c3c;
+    --warn: #e6b800;
+    --unknown: #8b93a1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: 0.02em; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  main {
+    padding: 24px 32px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card-top .name { font-weight: 600; font-size: 15px; }
+  .card-top .url { color: var(--muted); font-size: 12px; word-break: break-all; margin-top: 2px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; flex: none;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .badge.up { background: rgba(46,204,113,0.12); color: var(--up); }
+  .badge.up .dot { background: var(--up); }
+  .badge.down { background: rgba(231,76,60,0.12); color: var(--down); }
+  .badge.down .dot { background: var(--down); }
+  .badge.unknown { background: rgba(139,147,161,0.12); color: var(--unknown); }
+  .badge.unknown .dot { background: var(--unknown); }
+  .metric { margin-top: 14px; }
+  .metric .label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .bar { height: 6px; border-radius: 999px; background: #262b36; overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+  .footer-row { margin-top: 14px; display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .empty, .error-banner { padding: 60px 20px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
+  .error-banner { color: var(--down); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pulse</h1>
+  <div class="meta" id="refresh-meta">loading…</div>
+</header>
+<main id="app">
+  <div class="empty">Loading monitors…</div>
+</main>
+<script>
+// Points at the api service directly - override with window.PULSE_API_BASE if it's
+// not on localhost:8000 (e.g. a different docker-compose port mapping).
+const API_BASE = window.PULSE_API_BASE || "http://localhost:8000";
+const REFRESH_MS = 10000;
+
+function uptimeColor(pct) {
+  if (pct === null) return "var(--unknown)";
+  if (pct >= 99) return "var(--up)";
+  if (pct >= 95) return "var(--warn)";
+  return "var(--down)";
+}
+
+function budgetColor(pct) {
+  if (pct === null) return "var(--unknown)";
+  if (pct > 50) return "var(--up)";
+  if (pct > 0) return "var(--warn)";
+  return "var(--down)";
+}
+
+function timeAgo(iso) {
+  if (!iso) return "never checked";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value;
+  return div.innerHTML;
+}
+
+async function fetchJSON(path) {
+  const response = await fetch(`${API_BASE}${path}`);
+  if (!response.ok) throw new Error(`${path} -> ${response.status}`);
+  return response.json();
+}
+
+function renderCard(monitor, uptime, budget) {
+  const uptimePct = uptime ? uptime.uptime_percentage : null;
+  const budgetPct = budget ? budget.budget_remaining_percentage : null;
+
+  const uptimeLabel = uptimePct === null ? "no data" : `${uptimePct.toFixed(2)}%`;
+  const uptimeWidth = uptimePct === null ? 0 : Math.min(100, Math.max(0, uptimePct));
+
+  const budgetLabel = budgetPct === null ? "no data" : `${budgetPct.toFixed(1)}% remaining`;
+  const budgetWidth = budgetPct === null ? 0 : Math.min(100, Math.max(0, budgetPct));
+
+  return `
+    <div class="card">
+      <div class="card-top">
+        <div>
+          <div class="name">${escapeHtml(monitor.name)}</div>
+          <div class="url">${escapeHtml(monitor.url)}</div>
+        </div>
+        <span class="badge ${monitor.status}"><span class="dot"></span>${monitor.status}</span>
+      </div>
+      <div class="metric">
+        <div class="label"><span>Uptime (24h)</span><span>${uptimeLabel}</span></div>
+        <div class="bar"><span style="width:${uptimeWidth}%; background:${uptimeColor(uptimePct)}"></span></div>
+      </div>
+      <div class="metric">
+        <div class="label"><span>Error budget (${monitor.slo_target_percentage}% / ${monitor.slo_window_days}d)</span><span>${budgetLabel}</span></div>
+        <div class="bar"><span style="width:${budgetWidth}%; background:${budgetColor(budgetPct)}"></span></div>
+      </div>
+      <div class="footer-row">
+        <span>every ${monitor.interval_seconds}s</span>
+        <span>last check ${timeAgo(monitor.last_checked_at)}</span>
+      </div>
+    </div>
+  `;
+}
+
+async function refresh() {
+  const app = document.getElementById("app");
+  const meta = document.getElementById("refresh-meta");
+  try {
+    const monitors = await fetchJSON("/monitors");
+
+    if (monitors.length === 0) {
+      app.innerHTML = '<div class="empty">No monitors registered yet. POST to /monitors to add one.</div>';
+      meta.textContent = `updated ${new Date().toLocaleTimeString()}`;
+      return;
+    }
+
+    const cards = await Promise.all(
+      monitors.map(async (monitor) => {
+        const [uptime, budget] = await Promise.all([
+          fetchJSON(`/monitors/${monitor.id}/uptime?hours=24`).catch(() => null),
+          fetchJSON(`/monitors/${monitor.id}/error-budget`).catch(() => null),
+        ]);
+        return renderCard(monitor, uptime, budget);
+      })
+    );
+    app.innerHTML = cards.join("");
+    meta.textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    app.innerHTML = `<div class="error-banner">Could not reach Pulse API at ${API_BASE} (${err.message})</div>`;
+    meta.textContent = "connection error";
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

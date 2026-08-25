@@ -2,6 +2,7 @@ import datetime
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Pulse API", lifespan=lifespan)
+
+# The dashboard (dashboard/) is a static page served from its own origin (a plain
+# nginx container in docker-compose) and reads this API purely with GETs - wide open
+# read access is fine for a local monitoring tool with no auth yet (Phase 10 revisits
+# this once there's something to actually authenticate).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 def get_db():

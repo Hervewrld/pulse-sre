@@ -52,6 +52,16 @@ services:
       api:
         condition: service_healthy
 
+  dashboard:
+    image: nginx:alpine
+    volumes:
+      - ../dashboard:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
   scheduler:
     build:
       context: ..
