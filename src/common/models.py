@@ -24,6 +24,11 @@ class MonitorStatus(str, enum.Enum):
     DOWN = "down"
 
 
+class AlertEventType(str, enum.Enum):
+    DOWN = "down"
+    RECOVERED = "recovered"
+
+
 def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
@@ -59,8 +64,16 @@ class Monitor(Base):
     last_checked_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    alerting: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )  # a DOWN alert has fired and no RECOVERED has fired since
 
     check_results: Mapped[list["CheckResult"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    alert_events: Mapped[list["AlertEvent"]] = relationship(
         back_populates="monitor", cascade="all, delete-orphan"
     )
 
@@ -79,3 +92,16 @@ class CheckResult(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     monitor: Mapped["Monitor"] = relationship(back_populates="check_results")
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    monitor_id: Mapped[int] = mapped_column(ForeignKey("monitors.id"), nullable=False, index=True)
+    event_type: Mapped[AlertEventType] = mapped_column(Enum(AlertEventType), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+    monitor: Mapped["Monitor"] = relationship(back_populates="alert_events")

@@ -14,6 +14,9 @@ class Settings:
         )
         self.default_timeout_seconds = float(os.environ.get("DEFAULT_TIMEOUT_SECONDS", "5"))
         self.log_level = os.environ.get("LOG_LEVEL", "INFO")
+        self.slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL") or None
+        self.alert_failure_threshold = int(os.environ.get("ALERT_FAILURE_THRESHOLD", "3"))
+        self.alert_recovery_threshold = int(os.environ.get("ALERT_RECOVERY_THRESHOLD", "1"))
 
 
 settings = Settings()

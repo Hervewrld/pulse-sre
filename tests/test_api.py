@@ -98,6 +98,35 @@ def test_monitor_history_not_found():
     assert response.status_code == 404
 
 
+def test_monitor_alerts_returns_recorded_events():
+    with TestClient(app) as client:
+        created = client.post("/monitors", json={"name": "alerts", "url": "https://alerts.example.com"})
+        monitor_id = created.json()["id"]
+
+        from src.common import db
+        from src.common.models import AlertEvent, AlertEventType, utcnow
+
+        session = db.session_scope()
+        now = utcnow()
+        session.add(AlertEvent(monitor_id=monitor_id, event_type=AlertEventType.DOWN, created_at=now))
+        session.add(AlertEvent(monitor_id=monitor_id, event_type=AlertEventType.RECOVERED, created_at=now))
+        session.commit()
+        session.close()
+
+        response = client.get(f"/monitors/{monitor_id}/alerts")
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 2
+        assert {e["event_type"] for e in body} == {"down", "recovered"}
+        assert all(e["monitor_id"] == monitor_id for e in body)
+
+
+def test_monitor_alerts_not_found():
+    with TestClient(app) as client:
+        response = client.get("/monitors/999999/alerts")
+    assert response.status_code == 404
+
+
 def test_invalid_monitor_payload_rejected():
     with TestClient(app) as client:
         response = client.post("/monitors", json={"name": "", "url": "https://example.com"})
