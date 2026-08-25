@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.queries import compute_uptime
-from src.api.schemas import CheckResultOut, MonitorCreate, MonitorOut, UptimeOut
+from src.api.schemas import AlertEventOut, CheckResultOut, MonitorCreate, MonitorOut, UptimeOut
 from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
-from src.common.models import CheckResult, Monitor, utcnow
+from src.common.models import AlertEvent, CheckResult, Monitor, utcnow
 
 logger = setup_logging("api", settings.log_level)
 
@@ -110,3 +110,18 @@ def get_monitor_uptime(
         successful_checks=successful,
         uptime_percentage=percentage,
     )
+
+
+@app.get("/monitors/{monitor_id}/alerts", response_model=list[AlertEventOut])
+def get_monitor_alerts(monitor_id: int, limit: int = 100, session: Session = Depends(get_db)):
+    monitor = session.get(Monitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status_code=404, detail="monitor not found")
+
+    events = session.scalars(
+        select(AlertEvent)
+        .where(AlertEvent.monitor_id == monitor_id)
+        .order_by(AlertEvent.created_at.desc())
+        .limit(limit)
+    ).all()
+    return events

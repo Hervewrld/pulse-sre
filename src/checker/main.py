@@ -5,12 +5,15 @@ import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from src.alerting.notifier import build_notifier
+from src.alerting.rules import evaluate_check
 from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
-from src.common.models import CheckResult, Monitor, MonitorStatus
+from src.common.models import AlertEvent, CheckResult, Monitor, MonitorStatus
 
 logger = setup_logging("checker", settings.log_level)
+notifier = build_notifier(settings.slack_webhook_url, logger)
 
 
 @asynccontextmanager
@@ -60,6 +63,9 @@ def check(payload: CheckRequest):
         payload.url, payload.timeout_seconds
     )
 
+    event_type = None
+    monitor_snapshot = None
+
     session = db.session_scope()
     try:
         result = CheckResult(
@@ -74,6 +80,14 @@ def check(payload: CheckRequest):
         monitor = session.get(Monitor, payload.monitor_id)
         if monitor is not None:
             monitor.status = MonitorStatus.UP if success else MonitorStatus.DOWN
+            event_type = evaluate_check(
+                monitor, success, settings.alert_failure_threshold, settings.alert_recovery_threshold
+            )
+            if event_type is not None:
+                session.add(AlertEvent(monitor_id=monitor.id, event_type=event_type))
+                # captured now - monitor's attributes are expired once the session
+                # below closes, and the notify call happens after that
+                monitor_snapshot = (monitor.name, monitor.url)
 
         session.commit()
     finally:
@@ -85,6 +99,13 @@ def check(payload: CheckRequest):
         success,
         status_code,
     )
+
+    if monitor_snapshot is not None:
+        monitor_name, monitor_url = monitor_snapshot
+        try:
+            notifier.notify(monitor_name, monitor_url, event_type)
+        except httpx.HTTPError as exc:
+            logger.warning("alert notify failed monitor_id=%s error=%s", payload.monitor_id, exc)
 
     return CheckResponse(
         monitor_id=payload.monitor_id,

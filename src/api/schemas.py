@@ -2,7 +2,7 @@ import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.common.models import MonitorStatus
+from src.common.models import AlertEventType, MonitorStatus
 
 
 class MonitorCreate(BaseModel):
@@ -44,3 +44,12 @@ class CheckResultOut(BaseModel):
     status_code: int | None
     response_time_ms: float | None
     error: str | None
+
+
+class AlertEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    monitor_id: int
+    event_type: AlertEventType
+    created_at: datetime.datetime
