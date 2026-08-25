@@ -5,8 +5,15 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.queries import compute_uptime
-from src.api.schemas import AlertEventOut, CheckResultOut, MonitorCreate, MonitorOut, UptimeOut
+from src.api.queries import compute_error_budget, compute_uptime
+from src.api.schemas import (
+    AlertEventOut,
+    CheckResultOut,
+    ErrorBudgetOut,
+    MonitorCreate,
+    MonitorOut,
+    UptimeOut,
+)
 from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
@@ -45,6 +52,8 @@ def create_monitor(payload: MonitorCreate, session: Session = Depends(get_db)):
         url=payload.url,
         interval_seconds=payload.interval_seconds,
         timeout_seconds=payload.timeout_seconds,
+        slo_target_percentage=payload.slo_target_percentage,
+        slo_window_days=payload.slo_window_days,
     )
     session.add(monitor)
     session.commit()
@@ -109,6 +118,35 @@ def get_monitor_uptime(
         total_checks=total,
         successful_checks=successful,
         uptime_percentage=percentage,
+    )
+
+
+@app.get("/monitors/{monitor_id}/error-budget", response_model=ErrorBudgetOut)
+def get_monitor_error_budget(
+    monitor_id: int,
+    days: float | None = Query(default=None, gt=0),
+    session: Session = Depends(get_db),
+):
+    monitor = session.get(Monitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status_code=404, detail="monitor not found")
+
+    window_days = days if days is not None else monitor.slo_window_days
+    since = utcnow() - datetime.timedelta(days=window_days)
+    budget = compute_error_budget(session, monitor_id, since, monitor.slo_target_percentage)
+
+    return ErrorBudgetOut(
+        monitor_id=monitor_id,
+        slo_target_percentage=monitor.slo_target_percentage,
+        window_days=window_days,
+        total_checks=budget.total_checks,
+        failed_checks=budget.failed_checks,
+        uptime_percentage=budget.uptime_percentage,
+        error_budget_checks=budget.error_budget_checks,
+        budget_consumed_checks=budget.budget_consumed_checks,
+        budget_remaining_checks=budget.budget_remaining_checks,
+        budget_remaining_percentage=budget.budget_remaining_percentage,
+        burn_rate=budget.burn_rate,
     )
 
 
