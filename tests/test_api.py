@@ -69,6 +69,35 @@ def test_monitor_history_empty_for_new_monitor():
         assert response.json() == []
 
 
+def test_monitor_history_returns_recorded_checks():
+    with TestClient(app) as client:
+        created = client.post("/monitors", json={"name": "hist2", "url": "https://hist2.example.com"})
+        monitor_id = created.json()["id"]
+
+        from src.common import db
+        from src.common.models import CheckResult, utcnow
+
+        session = db.session_scope()
+        now = utcnow()
+        session.add(CheckResult(monitor_id=monitor_id, success=True, checked_at=now, status_code=200))
+        session.add(CheckResult(monitor_id=monitor_id, success=False, checked_at=now, error="timeout"))
+        session.commit()
+        session.close()
+
+        response = client.get(f"/monitors/{monitor_id}/history")
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 2
+        assert {r["success"] for r in body} == {True, False}
+        assert all(r["monitor_id"] == monitor_id for r in body)
+
+
+def test_monitor_history_not_found():
+    with TestClient(app) as client:
+        response = client.get("/monitors/999999/history")
+    assert response.status_code == 404
+
+
 def test_invalid_monitor_payload_rejected():
     with TestClient(app) as client:
         response = client.post("/monitors", json={"name": "", "url": "https://example.com"})
