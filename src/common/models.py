@@ -69,6 +69,8 @@ class Monitor(Base):
     alerting: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )  # a DOWN alert has fired and no RECOVERED has fired since
+    slo_target_percentage: Mapped[float] = mapped_column(Float, nullable=False, default=99.5)
+    slo_window_days: Mapped[float] = mapped_column(Float, nullable=False, default=30.0)
 
     check_results: Mapped[list["CheckResult"]] = relationship(
         back_populates="monitor", cascade="all, delete-orphan"
