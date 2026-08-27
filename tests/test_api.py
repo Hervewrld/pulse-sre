@@ -10,6 +10,13 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_dashboard_origin_to_read():
+    with TestClient(app) as client:
+        response = client.get("/health", headers={"Origin": "http://localhost:8080"})
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
 def test_create_and_get_monitor():
     with TestClient(app) as client:
         create_response = client.post(
