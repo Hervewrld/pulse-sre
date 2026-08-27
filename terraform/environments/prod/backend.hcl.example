@@ -1,0 +1,5 @@
+bucket         = "pulse-tfstate-<your-account-id>"
+key            = "pulse/prod/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "pulse-tfstate-lock"
+encrypt        = true
