@@ -45,14 +45,6 @@ module "ecs_cluster" {
   vpc_id = module.vpc.vpc_id
 }
 
-module "iam" {
-  source = "../../modules/iam"
-
-  name                = var.name
-  services            = var.services
-  ecr_repository_arns = module.ecr.repository_arns
-}
-
 module "rds" {
   source = "../../modules/rds"
 
@@ -63,4 +55,138 @@ module "rds" {
   instance_class      = "db.t4g.micro"
   multi_az            = false
   deletion_protection = false
+}
+
+module "secrets" {
+  source = "../../modules/secrets"
+
+  name = var.name
+  secrets = {
+    slack_webhook_url = "Slack incoming webhook URL the checker service posts down/recovered alerts to (Phase 2)."
+  }
+}
+
+module "iam" {
+  source = "../../modules/iam"
+
+  name                = var.name
+  services            = var.services
+  ecr_repository_arns = module.ecr.repository_arns
+
+  secret_arns = {
+    api       = [module.rds.master_user_secret_arn]
+    scheduler = [module.rds.master_user_secret_arn]
+    checker   = [module.rds.master_user_secret_arn, module.secrets.secret_arns["slack_webhook_url"]]
+  }
+}
+
+locals {
+  # DNS name the checker service is reachable at from api/scheduler, once
+  # modules/ecs_cluster's private namespace has a "checker" service registered
+  # in it below - matches "<name>.<namespace>" from that module's comment.
+  checker_dns_name = "checker.${var.name}.local"
+
+  db_environment = [
+    { name = "DB_HOST", value = module.rds.address },
+    { name = "DB_PORT", value = tostring(module.rds.port) },
+    { name = "DB_NAME", value = module.rds.database_name },
+  ]
+  db_secrets = [
+    { name = "DB_USER", value_from = "${module.rds.master_user_secret_arn}:username::" },
+    { name = "DB_PASSWORD", value_from = "${module.rds.master_user_secret_arn}:password::" },
+  ]
+}
+
+module "ecs_service_api" {
+  source = "../../modules/ecs_service"
+
+  # module.iam.execution_role_arns resolves as soon as the IAM roles exist,
+  # not once aws_iam_role_policy.execution (in that module) is attached to
+  # them - without this, a task can start before it's actually allowed to
+  # pull its image or read its secrets, failing with ResourceInitializationError.
+  depends_on = [module.iam]
+
+  name         = "api"
+  project_name = var.name
+  region       = var.region
+  cluster_id   = module.ecs_cluster.cluster_id
+
+  image          = "${module.ecr.repository_urls["api"]}:${var.image_tag}"
+  container_port = var.api_container_port
+
+  execution_role_arn = module.iam.execution_role_arns["api"]
+  task_role_arn      = module.iam.task_role_arns["api"]
+  log_group_name     = module.iam.log_group_names["api"]
+
+  # No CHECKER_URL here: src/api never calls checker (only src/scheduler does,
+  # see local.checker_dns_name below), and the checker security group only
+  # allows inbound from scheduler's SG anyway - api couldn't reach it if it tried.
+  environment = local.db_environment
+  secrets     = local.db_secrets
+
+  subnet_ids        = module.vpc.private_subnet_ids
+  security_group_id = module.security_groups.api_security_group_id
+  target_group_arn  = module.alb.api_target_group_arn
+}
+
+module "ecs_service_checker" {
+  source = "../../modules/ecs_service"
+
+  depends_on = [module.iam]
+
+  name         = "checker"
+  project_name = var.name
+  region       = var.region
+  cluster_id   = module.ecs_cluster.cluster_id
+
+  image          = "${module.ecr.repository_urls["checker"]}:${var.image_tag}"
+  container_port = var.checker_container_port
+
+  execution_role_arn = module.iam.execution_role_arns["checker"]
+  task_role_arn      = module.iam.task_role_arns["checker"]
+  log_group_name     = module.iam.log_group_names["checker"]
+
+  environment = local.db_environment
+  secrets = concat(local.db_secrets, [
+    { name = "SLACK_WEBHOOK_URL", value_from = module.secrets.secret_arns["slack_webhook_url"] },
+  ])
+
+  subnet_ids                     = module.vpc.private_subnet_ids
+  security_group_id              = module.security_groups.checker_security_group_id
+  service_discovery_namespace_id = module.ecs_cluster.service_discovery_namespace_id
+}
+
+module "ecs_service_scheduler" {
+  source = "../../modules/ecs_service"
+
+  depends_on = [module.iam]
+
+  name         = "scheduler"
+  project_name = var.name
+  region       = var.region
+  cluster_id   = module.ecs_cluster.cluster_id
+
+  image = "${module.ecr.repository_urls["scheduler"]}:${var.image_tag}"
+
+  execution_role_arn = module.iam.execution_role_arns["scheduler"]
+  task_role_arn      = module.iam.task_role_arns["scheduler"]
+  log_group_name     = module.iam.log_group_names["scheduler"]
+
+  environment = concat(local.db_environment, [
+    { name = "CHECKER_URL", value = "http://${local.checker_dns_name}:${var.checker_container_port}" },
+  ])
+  secrets = local.db_secrets
+
+  # Exactly one scheduler task, always: it stamps each due monitor's
+  # last_checked_at right before dispatching (see src/scheduler/main.py), with
+  # no locking between instances - a second instance would race the first and
+  # double-dispatch checks. 0/100 (instead of ECS's 100/200 default) makes
+  # that true even mid-deploy: the old task is stopped before the new one
+  # starts, instead of both running briefly.
+  desired_count                      = 1
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  subnet_ids        = module.vpc.private_subnet_ids
+  security_group_id = module.security_groups.scheduler_security_group_id
 }

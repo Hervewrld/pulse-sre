@@ -41,3 +41,16 @@ output "security_group_ids" {
     checker   = module.security_groups.checker_security_group_id
   }
 }
+
+output "ecs_service_names" {
+  value = {
+    api       = module.ecs_service_api.service_name
+    scheduler = module.ecs_service_scheduler.service_name
+    checker   = module.ecs_service_checker.service_name
+  }
+}
+
+output "slack_webhook_secret_arn" {
+  description = "Set the real value with: aws secretsmanager put-secret-value --secret-id <this arn> --secret-string '<webhook url>'"
+  value       = module.secrets.secret_arns["slack_webhook_url"]
+}

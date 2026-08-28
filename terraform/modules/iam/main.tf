@@ -45,6 +45,15 @@ data "aws_iam_policy_document" "execution" {
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.this[each.value].arn}:*"]
   }
+
+  dynamic "statement" {
+    for_each = length(lookup(var.secret_arns, each.value, [])) > 0 ? [1] : []
+    content {
+      sid       = "ReadOwnSecrets"
+      actions   = ["secretsmanager:GetSecretValue"]
+      resources = lookup(var.secret_arns, each.value, [])
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "execution" {
