@@ -2,14 +2,18 @@
 
 Phase 5 of `docs/roadmap.md` built the infrastructure shell - networking, an
 empty ECS cluster, an ALB with no live targets, ECR repositories with nothing
-pushed to them, IAM roles with nothing assuming them. Phase 6 (this state)
-pushes images, and runs `api`/`scheduler`/`checker` on top of that shell as
-ECS Fargate services, with the database credentials Secrets Manager already
-held from Phase 5 wired into their task definitions.
+pushed to them, IAM roles with nothing assuming them. Phase 6 runs
+`api`/`scheduler`/`checker` on top of that shell as ECS Fargate services,
+with the database credentials Secrets Manager already held from Phase 5
+wired into their task definitions. Phase 7 (`../.github/workflows/`) is
+built to call `terraform apply` from here on, once the one-time setup under
+"CI/CD (Phase 7)" below has actually been done in this AWS account/repo -
+until then, applying is still a manual `terraform apply` per the sections
+above.
 
 ```
 terraform/
-├── bootstrap/           # one-time: the S3 bucket + DynamoDB table for remote state
+├── bootstrap/           # one-time: state backend + the GitHub Actions OIDC role
 ├── modules/              # vpc, ecr, alb, security_groups, ecs_cluster, ecs_service,
 │                          # iam, rds, secrets
 └── environments/
@@ -89,3 +93,38 @@ aws secretsmanager put-secret-value \
 
 The checker service picks up a changed value on its next task restart (ECS
 resolves `secrets` values at task start, not continuously).
+
+## CI/CD (Phase 7)
+
+`.github/workflows/deploy.yml` runs `terraform apply` for you on every push
+to `main` - dev automatically, prod behind a manual approval gate - using
+short-lived credentials from the `pulse-github-deploy` IAM role
+(`bootstrap/github_oidc.tf`), not stored AWS keys. Nobody needs to run
+`terraform apply` from a laptop once this is wired up (dev/prod first apply
+above is the one exception - it has to exist before CI can update it).
+
+One-time setup, after `terraform apply` in `bootstrap/` (which now also
+creates the OIDC provider and deploy role):
+
+1. Set these as **repository variables** (not secrets - none of them are
+   sensitive), Settings > Secrets and variables > Actions > Variables:
+
+   | Name | Value |
+   | --- | --- |
+   | `AWS_DEPLOY_ROLE_ARN` | bootstrap's `github_deploy_role_arn` output |
+   | `TF_STATE_BUCKET` | bootstrap's `state_bucket` output |
+   | `TF_LOCK_TABLE` | bootstrap's `lock_table` output |
+   | `AWS_REGION` | `us-east-1` (or whatever `bootstrap`'s `region` output is) |
+
+2. Create a `production` GitHub Environment (Settings > Environments > New
+   environment) and add at least one required reviewer. That's the manual
+   approval gate for prod - `deploy-prod` in the workflow just references
+   `environment: production` and GitHub blocks the job until someone
+   approves it there. Also set "Deployment branches and tags" on that same
+   environment to only allow `main` - the OIDC trust policy's `sub` claim
+   accepts anything tagged `environment:production` regardless of branch, so
+   this branch restriction (not the trust policy) is what stops some other
+   workflow/branch from ever reaching that gate in the first place.
+
+`ci.yml` (lint/test/build/scan) needs none of this - it never touches AWS,
+so it runs on every PR from a fork just as safely as one from this repo.

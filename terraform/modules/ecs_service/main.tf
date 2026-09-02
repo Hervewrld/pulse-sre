@@ -3,16 +3,29 @@
 # ports, secrets and ALB/service-discovery wiring, sharing this one definition
 # so the three don't drift apart in how they're deployed.
 
-resource "aws_ecs_task_definition" "this" {
-  family                   = "${var.project_name}-${var.name}"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = tostring(var.cpu)
-  memory                   = tostring(var.memory)
-  execution_role_arn       = var.execution_role_arn
-  task_role_arn            = var.task_role_arn
+locals {
+  # A container-level health check is what lets ECS (and the deployment
+  # circuit breaker below) tell "started but broken" apart from "actually
+  # serving traffic" - without one, a task that starts but never actually
+  # works still counts as RUNNING and a bad deploy never gets caught or
+  # rolled back. api/checker get an HTTP check (the command reuses
+  # docker-compose's own python-urllib check for api - docker-compose.yml
+  # has none for checker to reuse, but both expose /health, see
+  # src/checker/main.py); scheduler has no HTTP server to check, so it's
+  # expected to pass health_check_command instead (a heartbeat-file freshness
+  # check - see src/scheduler/main.py) rather than get no check at all.
+  container_health_check = (
+    var.container_port != null ? {
+      command = [
+        "CMD-SHELL",
+        "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${var.container_port}${var.health_check_path}')\" || exit 1",
+      ]
+      } : var.health_check_command != null ? {
+      command = var.health_check_command
+    } : null
+  )
 
-  container_definitions = jsonencode([
+  container_definition = merge(
     {
       name      = var.name
       image     = var.image
@@ -37,8 +50,28 @@ resource "aws_ecs_task_definition" "this" {
           "awslogs-stream-prefix" = var.name
         }
       }
+    },
+    local.container_health_check == null ? {} : {
+      healthCheck = merge(local.container_health_check, {
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 10
+      })
     }
-  ])
+  )
+}
+
+resource "aws_ecs_task_definition" "this" {
+  family                   = "${var.project_name}-${var.name}"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.cpu)
+  memory                   = tostring(var.memory)
+  execution_role_arn       = var.execution_role_arn
+  task_role_arn            = var.task_role_arn
+
+  container_definitions = jsonencode([local.container_definition])
 }
 
 # Only created when this service needs to be reachable from other ECS services
@@ -87,6 +120,28 @@ resource "aws_ecs_service" "this" {
   # instance at a time. Callers that need that guarantee pass 0/100 instead.
   deployment_minimum_healthy_percent = var.deployment_minimum_healthy_percent
   deployment_maximum_percent         = var.deployment_maximum_percent
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  # Makes `terraform apply` block until the new tasks are stable, and (per the
+  # AWS provider's own handling of deployment_circuit_breaker) fail if a
+  # circuit breaker rollback happened along the way - ECS has already done the
+  # actual rollback by the time terraform reports it either way.
+  # .github/workflows/deploy.yml treats that apply failure as its first
+  # "automatic rollback on failure" signal, but doesn't only trust it: right
+  # after apply, that workflow separately calls DescribeServices/
+  # DescribeTaskDefinition and fails the job if the PRIMARY deployment's image
+  # isn't this build's tag - so even if this waiter ever reported "stable"
+  # without noticing a rollback (the old task definition satisfying the same
+  # stability check the new one would have), the pipeline still catches it.
+  wait_for_steady_state = true
+
+  timeouts {
+    update = "10m"
+  }
 
   dynamic "load_balancer" {
     for_each = var.target_group_arn == null ? [] : [1]

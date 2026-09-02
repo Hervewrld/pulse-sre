@@ -1,4 +1,5 @@
 import datetime
+import pathlib
 import time
 
 import httpx
@@ -19,7 +20,7 @@ def _as_utc(value: datetime.datetime) -> datetime.datetime:
     Treat a naive value as UTC so due-monitor comparisons work the same on both.
     """
     if value.tzinfo is None:
-        return value.replace(tzinfo=datetime.timezone.utc)
+        return value.replace(tzinfo=datetime.UTC)
     return value
 
 
@@ -73,6 +74,8 @@ def run_forever() -> None:
     db.init_engine(settings.database_url, create_tables=False)
     logger.info("scheduler started, polling every %ss", settings.scheduler_poll_interval_seconds)
 
+    heartbeat_path = pathlib.Path(settings.heartbeat_path)
+
     with httpx.Client() as client:
         while True:
             session = db.session_scope()
@@ -83,6 +86,12 @@ def run_forever() -> None:
             finally:
                 session.close()
 
+            # scheduler has no HTTP server, so unlike api/checker it can't get an
+            # ECS container health check by hitting an endpoint - this file's mtime
+            # is what terraform/modules/ecs_service's health_check_command checks
+            # instead, so a hang inside tick() (not just a crashed process) is
+            # still visible to ECS as unhealthy, not silently RUNNING-but-stuck.
+            heartbeat_path.touch()
             time.sleep(settings.scheduler_poll_interval_seconds)
 
 

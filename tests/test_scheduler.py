@@ -30,20 +30,20 @@ def make_monitor(session, **kwargs):
 
 def test_never_checked_monitor_is_due(session):
     monitor = make_monitor(session)
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
 
     assert due_monitors(session, now) == [monitor]
 
 
 def test_monitor_within_interval_is_not_due(session):
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     make_monitor(session, interval_seconds=60, last_checked_at=now - datetime.timedelta(seconds=10))
 
     assert due_monitors(session, now) == []
 
 
 def test_monitor_past_interval_is_due(session):
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     monitor = make_monitor(
         session, interval_seconds=60, last_checked_at=now - datetime.timedelta(seconds=61)
     )
@@ -53,7 +53,7 @@ def test_monitor_past_interval_is_due(session):
 
 def test_inactive_monitor_is_never_due(session):
     make_monitor(session, is_active=False)
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
 
     assert due_monitors(session, now) == []
 

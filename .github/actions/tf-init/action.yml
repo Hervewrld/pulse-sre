@@ -1,0 +1,24 @@
+name: terraform init
+description: terraform init against this project's S3/DynamoDB backend, using repo variables instead of the gitignored, account-specific backend.hcl.
+
+inputs:
+  working-directory:
+    required: true
+  state-bucket:
+    required: true
+  lock-table:
+    required: true
+  region:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ inputs.state-bucket }}" \
+          -backend-config="region=${{ inputs.region }}" \
+          -backend-config="dynamodb_table=${{ inputs.lock-table }}" \
+          -backend-config="encrypt=true"

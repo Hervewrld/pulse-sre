@@ -9,3 +9,14 @@ variable "project" {
   type        = string
   default     = "pulse"
 }
+
+variable "github_org" {
+  description = "GitHub org/user that owns the repo - scopes which workflow runs may assume the deploy role below."
+  type        = string
+  default     = "Hervewrld"
+}
+
+variable "github_repo" {
+  type    = string
+  default = "pulse-sre"
+}

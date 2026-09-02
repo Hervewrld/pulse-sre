@@ -25,7 +25,8 @@ def make_result(session, monitor_id, success, checked_at):
 def test_compute_uptime_with_no_checks_returns_none_percentage(session):
     monitor = make_monitor(session)
 
-    total, successful, percentage = compute_uptime(session, monitor.id, utcnow() - datetime.timedelta(hours=24))
+    since = utcnow() - datetime.timedelta(hours=24)
+    total, successful, percentage = compute_uptime(session, monitor.id, since)
 
     assert total == 0
     assert successful == 0

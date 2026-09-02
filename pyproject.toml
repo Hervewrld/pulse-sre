@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008 (function-call-in-default-argument): FastAPI's Depends()/Query() are meant to be used
+# exactly this way - see src/api/main.py - not a real bug.
+# UP042 (str,Enum -> StrEnum): would change src/common/models.py's public enum base class;
+# out of scope for introducing a linter.
+ignore = ["B008", "UP042"]

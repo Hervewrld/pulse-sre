@@ -1,0 +1,296 @@
+name: Deploy
+
+# Runs on every push to main (i.e. every merged PR, since main is protected -
+# see docs/git-workflow.md). Repo variables read below (Settings > Secrets
+# and variables > Actions > Variables) - see terraform/README.md for what to
+# set them to and how the OIDC role they name gets created.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false # never cancel a deploy already in flight
+
+permissions:
+  id-token: write # required to assume the AWS role via OIDC - no stored AWS keys
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  # Picked up by every `terraform plan`/`apply` below automatically (Terraform's
+  # own TF_VAR_<name> convention) - var.region otherwise silently falls back to
+  # its "us-east-1" default regardless of AWS_REGION above, which would apply
+  # infrastructure in a different region than CI authenticates against and
+  # stores state in.
+  TF_VAR_region: ${{ vars.AWS_REGION }}
+  TF_VERSION: "1.9.8"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "image_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  # dev and prod are separate ECR repos (terraform/modules/ecr is instantiated
+  # once per environment, so pulse-dev/api and pulse-prod/api are two distinct
+  # repos) - each service's image is built once here and pushed to both, so
+  # deploy-prod later deploys the exact bytes deploy-dev already proved out,
+  # not a fresh rebuild.
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        service: [api, scheduler, checker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build ${{ matrix.service }} image
+        run: docker build -f docker/Dockerfile --build-arg SERVICE=${{ matrix.service }} -t ${{ matrix.service }}:${{ needs.test.outputs.image_tag }} .
+
+      # ECR is IMMUTABLE (terraform/modules/ecr) - pushing a tag that's already
+      # there fails outright. Skipping tags that already exist (rather than
+      # letting that failure happen) is what makes re-running this job after a
+      # partial failure - e.g. dev push ok, prod push hit a transient error -
+      # safe: the retry only pushes what's actually still missing, instead of
+      # failing again on the half that already succeeded.
+      - name: Push to dev and prod ECR
+        run: |
+          for env in dev prod; do
+            repo_name="pulse-${env}/${{ matrix.service }}"
+            repo="${{ steps.ecr-login.outputs.registry }}/${repo_name}"
+            tag="${{ needs.test.outputs.image_tag }}"
+            if aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${tag}" >/dev/null 2>&1; then
+              echo "${repo}:${tag} already pushed, skipping"
+              continue
+            fi
+            docker tag ${{ matrix.service }}:${tag} "${repo}:${tag}"
+            docker push "${repo}:${tag}"
+          done
+
+  plan-dev:
+    runs-on: ubuntu-latest
+    needs: [test, build-and-push]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: ./.github/actions/tf-init
+        with:
+          working-directory: terraform/environments/dev
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          lock-table: ${{ vars.TF_LOCK_TABLE }}
+          region: ${{ env.AWS_REGION }}
+      - working-directory: terraform/environments/dev
+        run: terraform plan -input=false -var image_tag=${{ needs.test.outputs.image_tag }} -out=tfplan
+      - working-directory: terraform/environments/dev
+        run: |
+          {
+            echo '### dev plan'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-tfplan
+          path: terraform/environments/dev/tfplan
+          retention-days: 1
+
+  # Applies the exact plan reviewed in plan-dev's job summary above, not a
+  # freshly re-derived one - what gets approved (implicitly, dev has no gate;
+  # explicitly for prod below) is what gets applied, with nothing able to
+  # change in between.
+  deploy-dev:
+    runs-on: ubuntu-latest
+    needs: [test, plan-dev]
+    outputs:
+      alb_dns_name: ${{ steps.alb.outputs.alb_dns_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: ./.github/actions/tf-init
+        with:
+          working-directory: terraform/environments/dev
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          lock-table: ${{ vars.TF_LOCK_TABLE }}
+          region: ${{ env.AWS_REGION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dev-tfplan
+          path: terraform/environments/dev
+      # Blocks until the new tasks are stable (wait_for_steady_state in
+      # modules/ecs_service) and fails this step - halting the pipeline
+      # before smoke-test-dev/plan-prod run - if the deployment circuit
+      # breaker had to roll ECS back. That rollback already happened by the
+      # time this command returns; this is just the pipeline noticing.
+      - working-directory: terraform/environments/dev
+        run: terraform apply -input=false tfplan
+      - id: alb
+        working-directory: terraform/environments/dev
+        run: echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+      # Closes the gap noted in modules/ecs_service/main.tf: confirms each
+      # service's PRIMARY deployment is actually running this build's image,
+      # rather than trusting wait_for_steady_state alone to have noticed a
+      # circuit-breaker rollback - covers scheduler too, which has no ALB for
+      # smoke-test-dev below to reach.
+      - name: Verify deployed images match this build
+        working-directory: terraform/environments/dev
+        run: |
+          cluster="$(terraform output -raw ecs_cluster_name)"
+          for service_key in api scheduler checker; do
+            service_name="$(terraform output -json ecs_service_names | python3 -c "import json,sys; print(json.load(sys.stdin)['${service_key}'])")"
+            running_td="$(aws ecs describe-services --cluster "${cluster}" --services "${service_name}" \
+              --query "services[0].deployments[?status=='PRIMARY'].taskDefinition" --output text)"
+            running_image="$(aws ecs describe-task-definition --task-definition "${running_td}" \
+              --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+            if [[ "${running_image}" != *":${{ needs.test.outputs.image_tag }}" ]]; then
+              echo "${service_name}: expected image tag ${{ needs.test.outputs.image_tag }}, PRIMARY deployment is running ${running_image}" >&2
+              exit 1
+            fi
+          done
+
+  smoke-test-dev:
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    steps:
+      - name: Hit /health through the ALB
+        run: |
+          url="http://${{ needs.deploy-dev.outputs.alb_dns_name }}/health"
+          for _ in $(seq 1 10); do
+            if curl -fsS "${url}"; then exit 0; fi
+            sleep 10
+          done
+          echo "dev smoke test failed: ${url} never returned 200" >&2
+          exit 1
+
+  plan-prod:
+    runs-on: ubuntu-latest
+    needs: [test, build-and-push, smoke-test-dev]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: ./.github/actions/tf-init
+        with:
+          working-directory: terraform/environments/prod
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          lock-table: ${{ vars.TF_LOCK_TABLE }}
+          region: ${{ env.AWS_REGION }}
+      - working-directory: terraform/environments/prod
+        run: terraform plan -input=false -var image_tag=${{ needs.test.outputs.image_tag }} -out=tfplan
+      # Runs (and is visible in this job's summary) before deploy-prod's
+      # environment: production gate is even reached, so the required
+      # reviewer approving that gate can read the actual diff first instead
+      # of approving blind.
+      - working-directory: terraform/environments/prod
+        run: |
+          {
+            echo '### prod plan'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prod-tfplan
+          path: terraform/environments/prod/tfplan
+          retention-days: 1
+
+  # environment: production gates this job on the required reviewers
+  # configured on that GitHub Environment (Settings > Environments >
+  # production > required reviewers) - see terraform/README.md. Nothing
+  # upstream of this point touches prod at all.
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [test, plan-prod]
+    environment: production
+    outputs:
+      alb_dns_name: ${{ steps.alb.outputs.alb_dns_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: ./.github/actions/tf-init
+        with:
+          working-directory: terraform/environments/prod
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          lock-table: ${{ vars.TF_LOCK_TABLE }}
+          region: ${{ env.AWS_REGION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: prod-tfplan
+          path: terraform/environments/prod
+      - working-directory: terraform/environments/prod
+        run: terraform apply -input=false tfplan
+      - id: alb
+        working-directory: terraform/environments/prod
+        run: echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+      # See the matching step in deploy-dev.
+      - name: Verify deployed images match this build
+        working-directory: terraform/environments/prod
+        run: |
+          cluster="$(terraform output -raw ecs_cluster_name)"
+          for service_key in api scheduler checker; do
+            service_name="$(terraform output -json ecs_service_names | python3 -c "import json,sys; print(json.load(sys.stdin)['${service_key}'])")"
+            running_td="$(aws ecs describe-services --cluster "${cluster}" --services "${service_name}" \
+              --query "services[0].deployments[?status=='PRIMARY'].taskDefinition" --output text)"
+            running_image="$(aws ecs describe-task-definition --task-definition "${running_td}" \
+              --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+            if [[ "${running_image}" != *":${{ needs.test.outputs.image_tag }}" ]]; then
+              echo "${service_name}: expected image tag ${{ needs.test.outputs.image_tag }}, PRIMARY deployment is running ${running_image}" >&2
+              exit 1
+            fi
+          done
+
+  smoke-test-prod:
+    runs-on: ubuntu-latest
+    needs: deploy-prod
+    steps:
+      - name: Hit /health through the ALB
+        run: |
+          url="http://${{ needs.deploy-prod.outputs.alb_dns_name }}/health"
+          for _ in $(seq 1 10); do
+            if curl -fsS "${url}"; then exit 0; fi
+            sleep 10
+          done
+          echo "prod smoke test failed: ${url} never returned 200" >&2
+          exit 1

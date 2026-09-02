@@ -13,14 +13,14 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 
 ## Phases
 
-- [ ] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
-- [ ] **Phase 1 — Time-series storage**: real uptime-% queries from check history
-- [ ] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
-- [ ] **Phase 3 — SLO math**: error-budget burn-rate calculation
-- [ ] **Phase 4 — Dashboard**: `dashboard/`
-- [ ] **Phase 5 — AWS infra (Terraform)**: `terraform/`
-- [ ] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
-- [ ] **Phase 7 — CI/CD**: `.github/workflows/`
+- [x] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
+- [x] **Phase 1 — Time-series storage**: real uptime-% queries from check history
+- [x] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
+- [x] **Phase 3 — SLO math**: error-budget burn-rate calculation
+- [x] **Phase 4 — Dashboard**: `dashboard/`
+- [x] **Phase 5 — AWS infra (Terraform)**: `terraform/`
+- [x] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
+- [x] **Phase 7 — CI/CD**: `.github/workflows/`
 - [ ] **Phase 8 — Observability**: `monitoring/dashboards`, `monitoring/alerts`
 - [ ] **Phase 9 — Incident response**: `docs/postmortems/`
 - [ ] **Phase 10 — Security, DR, business continuity**

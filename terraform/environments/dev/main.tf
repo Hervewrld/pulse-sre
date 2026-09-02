@@ -168,6 +168,16 @@ module "ecs_service_scheduler" {
 
   image = "${module.ecr.repository_urls["scheduler"]}:${var.image_tag}"
 
+  # scheduler has no HTTP server for a health check to hit - this checks the
+  # heartbeat file src/scheduler/main.py touches once per successful poll
+  # loop instead, so a hang inside that loop (not just a crashed process) is
+  # still visible to ECS's deployment circuit breaker. Path must match
+  # settings.heartbeat_path's default (HEARTBEAT_PATH env var, unset here).
+  health_check_command = [
+    "CMD-SHELL",
+    "python -c \"import time,os,sys; sys.exit(0 if time.time() - os.path.getmtime('/tmp/pulse-heartbeat') < 60 else 1)\"",
+  ]
+
   execution_role_arn = module.iam.execution_role_arns["scheduler"]
   task_role_arn      = module.iam.task_role_arns["scheduler"]
   log_group_name     = module.iam.log_group_names["scheduler"]

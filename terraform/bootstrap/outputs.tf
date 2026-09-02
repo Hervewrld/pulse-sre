@@ -11,3 +11,8 @@ output "lock_table" {
 output "region" {
   value = var.region
 }
+
+output "github_deploy_role_arn" {
+  description = "Set as the AWS_DEPLOY_ROLE_ARN repo variable (Settings > Secrets and variables > Actions) so .github/workflows/deploy.yml can assume it."
+  value       = aws_iam_role.github_deploy.arn
+}
