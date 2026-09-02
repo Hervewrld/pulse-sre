@@ -2,6 +2,7 @@ import datetime
 import time
 
 import httpx
+from aws_xray_sdk.core import xray_recorder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
 from src.common.models import Monitor, utcnow
+from src.common.tracing import setup_tracing
 
 logger = setup_logging("scheduler", settings.log_level)
 
@@ -38,14 +40,24 @@ def due_monitors(session: Session, now: datetime.datetime) -> list[Monitor]:
 
 
 def dispatch_check(monitor: Monitor, checker_url: str, client: httpx.Client) -> None:
-    client.post(
-        f"{checker_url}/check",
-        json={
-            "monitor_id": monitor.id,
-            "url": monitor.url,
-            "timeout_seconds": monitor.timeout_seconds,
-        },
-    )
+    def _post() -> None:
+        client.post(
+            f"{checker_url}/check",
+            json={
+                "monitor_id": monitor.id,
+                "url": monitor.url,
+                "timeout_seconds": monitor.timeout_seconds,
+            },
+        )
+
+    # A segment per dispatch (not one per tick, most of which find nothing due) - subsegments
+    # need an already-open segment to attach to, and scheduler runs no requests of its own for
+    # one to piggyback on, unlike api/checker's per-request segment (src/api/main.py).
+    if settings.xray_enabled:
+        with xray_recorder.in_segment(name="scheduler dispatch_check"):
+            _post()
+    else:
+        _post()
 
 
 def tick(session: Session, checker_url: str, client: httpx.Client) -> list[Monitor]:
@@ -70,6 +82,9 @@ def tick(session: Session, checker_url: str, client: httpx.Client) -> list[Monit
 
 
 def run_forever() -> None:
+    # Before the httpx.Client() below - setup_tracing() (when enabled) replaces httpx.Client
+    # with an instrumented subclass, and that only applies to clients constructed afterward.
+    setup_tracing("scheduler", asgi=False)
     db.init_engine(settings.database_url, create_tables=False)
     logger.info("scheduler started, polling every %ss", settings.scheduler_poll_interval_seconds)
 

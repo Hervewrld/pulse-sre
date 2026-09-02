@@ -2,7 +2,8 @@ import time
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from aws_xray_sdk.core import xray_recorder
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from src.alerting.notifier import build_notifier
@@ -11,6 +12,7 @@ from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
 from src.common.models import AlertEvent, CheckResult, Monitor, MonitorStatus
+from src.common.tracing import setup_tracing
 
 logger = setup_logging("checker", settings.log_level)
 notifier = build_notifier(settings.slack_webhook_url, logger)
@@ -18,12 +20,32 @@ notifier = build_notifier(settings.slack_webhook_url, logger)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_tracing("checker", asgi=True)
     db.init_engine(settings.database_url, create_tables=False)
     logger.info("checker started")
     yield
 
 
 app = FastAPI(title="Pulse Checker", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def xray_middleware(request: Request, call_next):
+    # /health is hit every ~30s by the ECS container health check (modules/ecs_service) -
+    # tracing it would drown real request traces in noise.
+    if not settings.xray_enabled or request.url.path == "/health":
+        return await call_next(request)
+
+    async with xray_recorder.in_segment_async(name=f"checker {request.url.path}") as segment:
+        segment.put_http_meta("method", request.method)
+        segment.put_http_meta("url", str(request.url))
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            segment.add_exception(exc, [])
+            raise
+        segment.put_http_meta("status", response.status_code)
+        return response
 
 
 class CheckRequest(BaseModel):
@@ -94,10 +116,11 @@ def check(payload: CheckRequest):
         session.close()
 
     logger.info(
-        "checked monitor_id=%s success=%s status_code=%s",
+        "checked monitor_id=%s success=%s status_code=%s response_time_ms=%s",
         payload.monitor_id,
         success,
         status_code,
+        response_time_ms,
     )
 
     if monitor_snapshot is not None:

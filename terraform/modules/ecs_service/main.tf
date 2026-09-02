@@ -3,6 +3,60 @@
 # ports, secrets and ALB/service-discovery wiring, sharing this one definition
 # so the three don't drift apart in how they're deployed.
 
+locals {
+  app_container = {
+    name      = var.name
+    image     = var.image
+    essential = true
+    portMappings = var.container_port == null ? [] : [
+      {
+        containerPort = var.container_port
+        protocol      = "tcp"
+      }
+    ]
+    # X-Ray daemon sidecar (below) listens on UDP 2000 inside the task's shared
+    # awsvpc network namespace - reachable at localhost from this container, no
+    # separate service/DNS entry needed, same as any other same-task sidecar.
+    environment = concat(var.environment, var.enable_xray ? [{ name = "XRAY_ENABLED", value = "true" }] : [])
+    # AWS's container definition schema wants "valueFrom" (camelCase); the
+    # var's value_from (matching Terraform's snake_case convention) would
+    # otherwise pass through jsonencode as the literal wrong key and make
+    # RegisterTaskDefinition reject the whole task definition.
+    secrets = [for s in var.secrets : { name = s.name, valueFrom = s.value_from }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = var.log_group_name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = var.name
+      }
+    }
+  }
+
+  # Own log stream prefix ("xray" not var.name) so the daemon's own logs don't
+  # interleave with the app's in the same log group - same group is fine,
+  # there's no per-service group for it to have its own.
+  xray_sidecar = {
+    name      = "xray-daemon"
+    image     = "public.ecr.aws/xray/aws-xray-daemon:latest"
+    essential = false
+    portMappings = [
+      {
+        containerPort = 2000
+        protocol      = "udp"
+      }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = var.log_group_name
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "xray"
+      }
+    }
+  }
+}
+
 resource "aws_ecs_task_definition" "this" {
   family                   = "${var.project_name}-${var.name}"
   requires_compatibilities = ["FARGATE"]
@@ -12,33 +66,9 @@ resource "aws_ecs_task_definition" "this" {
   execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
 
-  container_definitions = jsonencode([
-    {
-      name      = var.name
-      image     = var.image
-      essential = true
-      portMappings = var.container_port == null ? [] : [
-        {
-          containerPort = var.container_port
-          protocol      = "tcp"
-        }
-      ]
-      environment = var.environment
-      # AWS's container definition schema wants "valueFrom" (camelCase); the
-      # var's value_from (matching Terraform's snake_case convention) would
-      # otherwise pass through jsonencode as the literal wrong key and make
-      # RegisterTaskDefinition reject the whole task definition.
-      secrets = [for s in var.secrets : { name = s.name, valueFrom = s.value_from }]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = var.log_group_name
-          "awslogs-region"        = var.region
-          "awslogs-stream-prefix" = var.name
-        }
-      }
-    }
-  ])
+  container_definitions = jsonencode(
+    concat([local.app_container], var.enable_xray ? [local.xray_sidecar] : [])
+  )
 }
 
 # Only created when this service needs to be reachable from other ECS services

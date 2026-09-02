@@ -13,15 +13,15 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 
 ## Phases
 
-- [ ] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
-- [ ] **Phase 1 — Time-series storage**: real uptime-% queries from check history
-- [ ] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
-- [ ] **Phase 3 — SLO math**: error-budget burn-rate calculation
-- [ ] **Phase 4 — Dashboard**: `dashboard/`
-- [ ] **Phase 5 — AWS infra (Terraform)**: `terraform/`
-- [ ] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
-- [ ] **Phase 7 — CI/CD**: `.github/workflows/`
-- [ ] **Phase 8 — Observability**: `monitoring/dashboards`, `monitoring/alerts`
+- [x] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
+- [x] **Phase 1 — Time-series storage**: real uptime-% queries from check history
+- [x] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
+- [x] **Phase 3 — SLO math**: error-budget burn-rate calculation
+- [x] **Phase 4 — Dashboard**: `dashboard/`
+- [x] **Phase 5 — AWS infra (Terraform)**: `terraform/`
+- [x] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
+- [ ] **Phase 7 — CI/CD**: `.github/workflows/` (code complete - [PR #9](https://github.com/Hervewrld/pulse-sre/pull/9), not yet merged)
+- [x] **Phase 8 — Observability**: CloudWatch alarms/SNS/dashboard, Logs Insights, X-Ray (`terraform/modules/observability`)
 - [ ] **Phase 9 — Incident response**: `docs/postmortems/`
 - [ ] **Phase 10 — Security, DR, business continuity**
 - [ ] **Phase 11 — SLO burn-rate dashboard (production)**
@@ -51,11 +51,16 @@ pulse/
 │   └── environments/    # dev / prod
 ├── k8s/                  # optional, Phase 12
 ├── .github/workflows/    # CI/CD
-├── monitoring/
-│   ├── dashboards/        # Grafana dashboard JSON
-│   └── alerts/             # Prometheus/CloudWatch alert rules
+├── monitoring/           # unused - see below
 └── docs/
     ├── roadmap.md          # full phase-by-phase plan
     ├── git-workflow.md
     └── postmortems/         # Phase 9 incident write-ups
 ```
+
+`monitoring/` is a leftover from the original scaffold's plan to hand-write Grafana
+JSON/Prometheus rules there - Phase 8 built infra-level monitoring (dashboard,
+alarms, Logs Insights queries) as Terraform instead (`terraform/modules/observability`,
+documented in `terraform/README.md`), so it's the source of truth and there's nothing
+for this directory to hold. Real Grafana is still coming in Phase 11, against
+production SLO data specifically - see `docs/roadmap.md`.

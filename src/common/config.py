@@ -16,6 +16,7 @@ class Settings:
         self.slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL") or None
         self.alert_failure_threshold = int(os.environ.get("ALERT_FAILURE_THRESHOLD", "3"))
         self.alert_recovery_threshold = int(os.environ.get("ALERT_RECOVERY_THRESHOLD", "1"))
+        self.xray_enabled = os.environ.get("XRAY_ENABLED", "false").lower() == "true"
 
     @staticmethod
     def _build_database_url() -> str:

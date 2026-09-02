@@ -64,13 +64,37 @@ resource "aws_iam_role_policy" "execution" {
 }
 
 # Task role: what the application code itself is allowed to do at runtime, as
-# opposed to the execution role's infra-level image-pull/logging duties.
-# Empty for now - none of api/scheduler/checker call other AWS APIs yet - but
-# each service gets its own so a future capability (e.g. checker publishing
-# custom CloudWatch metrics in Phase 8) can be scoped to just that service
-# instead of loosening a shared role for everyone.
+# opposed to the execution role's infra-level image-pull/logging duties. Each
+# service gets its own so a future capability can be scoped to just that
+# service instead of loosening a shared role for everyone.
 resource "aws_iam_role" "task" {
   for_each           = toset(var.services)
   name               = "${var.name}-${each.value}-task"
   assume_role_policy = data.aws_iam_policy_document.assume_ecs_tasks.json
+}
+
+# Every service's X-Ray daemon sidecar (modules/ecs_service's enable_xray)
+# calls these on the app's behalf to actually ship trace data - not scoped
+# per-service since none of these actions support resource-level ARNs anyway
+# (same tradeoff as ecr:GetAuthorizationToken above), and granting it
+# unconditionally to every task role is simpler than threading an
+# enable_xray-shaped variable through this module too just to gate it.
+data "aws_iam_policy_document" "task" {
+  statement {
+    sid = "XRayDaemon"
+    actions = [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules",
+      "xray:GetSamplingTargets",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task" {
+  for_each = toset(var.services)
+  name     = "${var.name}-${each.value}-task"
+  role     = aws_iam_role.task[each.value].id
+  policy   = data.aws_iam_policy_document.task.json
 }
