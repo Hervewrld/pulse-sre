@@ -33,8 +33,12 @@ variable "cpu" {
 }
 
 variable "memory" {
+  # 512 (the Fargate minimum at cpu=256) is enough for the app container alone,
+  # but tight once enable_xray adds the daemon sidecar into the same task - 1024
+  # leaves it comfortable room without needing a separate override anywhere
+  # enable_xray = true is set.
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "desired_count" {
@@ -102,4 +106,10 @@ variable "deployment_maximum_percent" {
   description = "ECS's rolling-deployment ceiling. Default (200) matches ECS's own default. Set to 100 (alongside deployment_minimum_healthy_percent = 0) for a service that must never run more than desired_count instances at once, even briefly mid-deploy."
   type        = number
   default     = 200
+}
+
+variable "enable_xray" {
+  description = "Adds an X-Ray daemon sidecar container to the task and sets XRAY_ENABLED=true on the app container (src/common/tracing.py). The task role also needs xray:PutTraceSegments etc - see modules/iam."
+  type        = bool
+  default     = false
 }

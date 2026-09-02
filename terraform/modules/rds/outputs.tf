@@ -18,3 +18,8 @@ output "master_user_secret_arn" {
 output "database_name" {
   value = var.database_name
 }
+
+output "identifier" {
+  description = "The DBInstanceIdentifier CloudWatch metrics (AWS/RDS namespace) are dimensioned by - modules/observability's alarms and dashboard."
+  value       = aws_db_instance.this.identifier
+}

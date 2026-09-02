@@ -112,6 +112,7 @@ module "ecs_service_api" {
 
   image          = "${module.ecr.repository_urls["api"]}:${var.image_tag}"
   container_port = var.api_container_port
+  enable_xray    = true
   # Two tasks across two AZs, sized above the Fargate minimum - dev runs the
   # single-task/minimum-size default from modules/ecs_service instead.
   cpu           = 512
@@ -145,6 +146,7 @@ module "ecs_service_checker" {
 
   image          = "${module.ecr.repository_urls["checker"]}:${var.image_tag}"
   container_port = var.checker_container_port
+  enable_xray    = true
   cpu            = 512
   memory         = 1024
   desired_count  = 2
@@ -173,7 +175,8 @@ module "ecs_service_scheduler" {
   region       = var.region
   cluster_id   = module.ecs_cluster.cluster_id
 
-  image = "${module.ecr.repository_urls["scheduler"]}:${var.image_tag}"
+  image       = "${module.ecr.repository_urls["scheduler"]}:${var.image_tag}"
+  enable_xray = true
 
   execution_role_arn = module.iam.execution_role_arns["scheduler"]
   task_role_arn      = module.iam.task_role_arns["scheduler"]
@@ -192,4 +195,22 @@ module "ecs_service_scheduler" {
 
   subnet_ids        = module.vpc.private_subnet_ids
   security_group_id = module.security_groups.scheduler_security_group_id
+}
+
+module "observability" {
+  source = "../../modules/observability"
+
+  name   = var.name
+  region = var.region
+
+  alb_arn_suffix              = module.alb.alb_arn_suffix
+  api_target_group_arn_suffix = module.alb.api_target_group_arn_suffix
+  ecs_cluster_name            = module.ecs_cluster.cluster_name
+  ecs_service_names = {
+    api       = module.ecs_service_api.service_name
+    scheduler = module.ecs_service_scheduler.service_name
+    checker   = module.ecs_service_checker.service_name
+  }
+  log_group_names        = module.iam.log_group_names
+  db_instance_identifier = module.rds.identifier
 }

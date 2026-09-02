@@ -1,7 +1,8 @@
 import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from aws_xray_sdk.core import xray_recorder
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,12 +20,14 @@ from src.common import db
 from src.common.config import settings
 from src.common.logging import setup_logging
 from src.common.models import AlertEvent, CheckResult, Monitor, utcnow
+from src.common.tracing import setup_tracing
 
 logger = setup_logging("api", settings.log_level)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_tracing("api", asgi=True)
     db.init_engine(settings.database_url)
     logger.info("api started")
     yield
@@ -42,6 +45,25 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def xray_middleware(request: Request, call_next):
+    # /health is hit every ~30s by both the ALB and the ECS container health check
+    # (modules/ecs_service) - tracing it would drown real request traces in noise.
+    if not settings.xray_enabled or request.url.path == "/health":
+        return await call_next(request)
+
+    async with xray_recorder.in_segment_async(name=f"api {request.url.path}") as segment:
+        segment.put_http_meta("method", request.method)
+        segment.put_http_meta("url", str(request.url))
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            segment.add_exception(exc, [])
+            raise
+        segment.put_http_meta("status", response.status_code)
+        return response
 
 
 def get_db():

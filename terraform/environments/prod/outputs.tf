@@ -54,3 +54,8 @@ output "slack_webhook_secret_arn" {
   description = "Set the real value with: aws secretsmanager put-secret-value --secret-id <this arn> --secret-string '<webhook url>'"
   value       = module.secrets.secret_arns["slack_webhook_url"]
 }
+
+output "observability_sns_topic_arn" {
+  description = "Subscribe an endpoint with: aws sns subscribe --topic-arn <this arn> --protocol email --notification-endpoint <you>"
+  value       = module.observability.sns_topic_arn
+}
