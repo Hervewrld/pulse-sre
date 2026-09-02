@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with deploy.yml's TF_VERSION - both apply to the same
+  # terraform/ configs, so a version this validates against but deploy.yml's
+  # apply doesn't match (or vice versa) defeats the point of validating here.
+  TF_VERSION: "1.9.8"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check src tests
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - run: terraform fmt -check -recursive terraform
+
+      - name: terraform validate (dev)
+        working-directory: terraform/environments/dev
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: terraform validate (prod)
+        working-directory: terraform/environments/prod
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: terraform validate (bootstrap)
+        working-directory: terraform/bootstrap
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  # Builds each service's image (no push - a PR shouldn't be able to publish
+  # anything) and scans it, so an image that won't build or ships a known-CVE
+  # base/dependency fails the PR instead of the next push-to-main deploy.
+  build-and-scan-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, scheduler, checker]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.service }} image
+        run: docker build -f docker/Dockerfile --build-arg SERVICE=${{ matrix.service }} -t pulse-${{ matrix.service }}:ci .
+      - name: Scan ${{ matrix.service }} image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: pulse-${{ matrix.service }}:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+  scan-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt
+
+  scan-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: CRITICAL,HIGH
+          exit-code: "1"

@@ -30,7 +30,7 @@ class AlertEventType(str, enum.Enum):
 
 
 def utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def to_naive_utc(value: datetime.datetime) -> datetime.datetime:
@@ -43,7 +43,7 @@ def to_naive_utc(value: datetime.datetime) -> datetime.datetime:
     using it everywhere keeps queries portable across both.
     """
     if value.tzinfo is not None:
-        value = value.astimezone(datetime.timezone.utc)
+        value = value.astimezone(datetime.UTC)
         return value.replace(tzinfo=None)
     return value
 

@@ -86,6 +86,18 @@ variable "service_discovery_namespace_id" {
   default     = null
 }
 
+variable "health_check_path" {
+  description = "Only applies when container_port is set - HTTP path the container-level health check (and, for api, the ALB target group's own check) hits."
+  type        = string
+  default     = "/health"
+}
+
+variable "health_check_command" {
+  description = "Only applies when container_port is null (a service with no HTTP server to check, e.g. scheduler) - the container healthCheck's CMD-SHELL command, e.g. checking a heartbeat file's freshness. Left null means no container-level health check at all for that service, and no deployment circuit breaker signal beyond the task process staying RUNNING."
+  type        = list(string)
+  default     = null
+}
+
 variable "health_check_grace_period_seconds" {
   description = "Only applies when target_group_arn is set - how long ECS waits before acting on a failing ALB health check, so a slow-starting task isn't killed mid-boot."
   type        = number

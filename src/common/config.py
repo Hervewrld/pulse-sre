@@ -8,6 +8,7 @@ class Settings:
     def __init__(self) -> None:
         self.database_url = self._build_database_url()
         self.checker_url = os.environ.get("CHECKER_URL", "http://localhost:8001")
+        self.heartbeat_path = os.environ.get("HEARTBEAT_PATH", "/tmp/pulse-heartbeat")
         self.scheduler_poll_interval_seconds = float(
             os.environ.get("SCHEDULER_POLL_INTERVAL_SECONDS", "5")
         )
