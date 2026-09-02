@@ -26,3 +26,8 @@ variable "checker_container_port" {
   type        = number
   default     = 8001
 }
+
+variable "image_tag" {
+  description = "Tag to deploy for all three service images (e.g. a git short SHA from scripts/push_images.sh). No default: ECR repositories are IMMUTABLE (see modules/ecr), so \"latest\" can only ever be pushed once - every real deploy needs its own tag."
+  type        = string
+}

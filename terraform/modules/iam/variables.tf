@@ -18,3 +18,9 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "secret_arns" {
+  description = "Map of service name -> Secrets Manager secret ARNs that service's execution role may read. Secrets referenced in an ECS task definition's `secrets` block are resolved by the ECS agent using the execution role, not the task role, so this grant lives here rather than on aws_iam_role.task."
+  type        = map(list(string))
+  default     = {}
+}
