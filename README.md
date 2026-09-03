@@ -13,16 +13,16 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 
 ## Phases
 
-- [ ] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
-- [ ] **Phase 1 — Time-series storage**: real uptime-% queries from check history
-- [ ] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
-- [ ] **Phase 3 — SLO math**: error-budget burn-rate calculation
-- [ ] **Phase 4 — Dashboard**: `dashboard/`
-- [ ] **Phase 5 — AWS infra (Terraform)**: `terraform/`
-- [ ] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
-- [ ] **Phase 7 — CI/CD**: `.github/workflows/`
-- [ ] **Phase 8 — Observability**: `monitoring/dashboards`, `monitoring/alerts`
-- [ ] **Phase 9 — Incident response**: `docs/postmortems/`
+- [x] **Phase 0 — Core app**: `src/api`, `src/scheduler`, `src/checker`, `tests/`
+- [x] **Phase 1 — Time-series storage**: real uptime-% queries from check history
+- [x] **Phase 2 — Alerting logic**: debounced alerts, Slack notification
+- [x] **Phase 3 — SLO math**: error-budget burn-rate calculation
+- [x] **Phase 4 — Dashboard**: `dashboard/`
+- [x] **Phase 5 — AWS infra (Terraform)**: `terraform/`
+- [x] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
+- [ ] **Phase 7 — CI/CD**: `.github/workflows/` (code complete - [PR #9](https://github.com/Hervewrld/pulse-sre/pull/9), not yet merged)
+- [ ] **Phase 8 — Observability**: CloudWatch alarms/SNS/dashboard, Logs Insights, X-Ray (code complete - [PR #10](https://github.com/Hervewrld/pulse-sre/pull/10), not yet merged)
+- [ ] **Phase 9 — Incident response**: `docs/postmortems/`, `scripts/chaos/` (drills built and ready - see `docs/postmortems/README.md`; actually running them and writing up real postmortems is the deliverable, still open)
 - [ ] **Phase 10 — Security, DR, business continuity**
 - [ ] **Phase 11 — SLO burn-rate dashboard (production)**
 - [ ] **Phase 12 — Optional: Kubernetes**: `k8s/base`, `k8s/helm`
@@ -44,6 +44,7 @@ pulse/
 │   └── common/         # shared code: db models, config, logging setup
 ├── tests/
 ├── scripts/            # bash automation
+│   └── chaos/           # Phase 9 - deliberately break things, on purpose
 ├── docker/             # Dockerfiles + docker-compose
 ├── dashboard/           # simple status page (Phase 4)
 ├── terraform/
