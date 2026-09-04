@@ -59,3 +59,8 @@ output "observability_sns_topic_arn" {
   description = "Subscribe an endpoint with: aws sns subscribe --topic-arn <this arn> --protocol email --notification-endpoint <you>"
   value       = module.observability.sns_topic_arn
 }
+
+output "private_subnet_ids" {
+  description = "One per AZ, same order as local.azs - scripts/chaos/az-failure-drill.sh uses this to temporarily remove one AZ's subnet from a service's placement options."
+  value       = module.vpc.private_subnet_ids
+}

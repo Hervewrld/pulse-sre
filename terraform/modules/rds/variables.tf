@@ -51,3 +51,8 @@ variable "backup_retention_days" {
   type    = number
   default = 7
 }
+
+variable "password_rotation_days" {
+  type    = number
+  default = 30
+}
