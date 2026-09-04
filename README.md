@@ -22,8 +22,8 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 - [x] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
 - [ ] **Phase 7 — CI/CD**: `.github/workflows/` (code complete - [PR #9](https://github.com/Hervewrld/pulse-sre/pull/9), not yet merged)
 - [x] **Phase 8 — Observability**: CloudWatch alarms/SNS/dashboard, Logs Insights, X-Ray (`terraform/modules/observability`)
-- [ ] **Phase 9 — Incident response**: `docs/postmortems/`
-- [ ] **Phase 10 — Security, DR, business continuity**
+- [ ] **Phase 9 — Incident response**: `docs/postmortems/`, `scripts/chaos/` (drills built - [PR #11](https://github.com/Hervewrld/pulse-sre/pull/11), not yet merged; real postmortems still need writing after they're run)
+- [ ] **Phase 10 — Security, DR, business continuity**: least-privilege IAM/SGs (already in place from earlier phases), optional HTTPS, secrets rotation, `docs/disaster-recovery.md`, `scripts/chaos/az-failure-drill.sh` (code complete, not yet merged; drills not yet run for real proof)
 - [ ] **Phase 11 — SLO burn-rate dashboard (production)**
 - [ ] **Phase 12 — Optional: Kubernetes**: `k8s/base`, `k8s/helm`
 
@@ -44,6 +44,7 @@ pulse/
 │   └── common/         # shared code: db models, config, logging setup
 ├── tests/
 ├── scripts/            # bash automation
+│   └── chaos/            # Phase 9/10 - deliberately break things, on purpose
 ├── docker/             # Dockerfiles + docker-compose
 ├── dashboard/           # simple status page (Phase 4)
 ├── terraform/
@@ -55,6 +56,7 @@ pulse/
 └── docs/
     ├── roadmap.md          # full phase-by-phase plan
     ├── git-workflow.md
+    ├── disaster-recovery.md # Phase 10 - RTO/RPO per failure scenario
     └── postmortems/         # Phase 9 incident write-ups
 ```
 
