@@ -39,6 +39,7 @@ output "security_group_ids" {
     api       = module.security_groups.api_security_group_id
     scheduler = module.security_groups.scheduler_security_group_id
     checker   = module.security_groups.checker_security_group_id
+    grafana   = module.security_groups.grafana_security_group_id
   }
 }
 
@@ -47,7 +48,13 @@ output "ecs_service_names" {
     api       = module.ecs_service_api.service_name
     scheduler = module.ecs_service_scheduler.service_name
     checker   = module.ecs_service_checker.service_name
+    grafana   = module.ecs_service_grafana.service_name
   }
+}
+
+output "grafana_url" {
+  description = "Default admin login is admin/admin (Grafana forces a password change on first login) - Phase 11 doesn't wire up SSO/a real auth provider."
+  value       = "http://${module.alb.alb_dns_name}/grafana/"
 }
 
 output "slack_webhook_secret_arn" {

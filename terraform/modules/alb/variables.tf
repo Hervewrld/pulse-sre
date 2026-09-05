@@ -21,3 +21,9 @@ variable "health_check_path" {
   type    = string
   default = "/health"
 }
+
+variable "grafana_port" {
+  description = "Port the grafana container listens on."
+  type        = number
+  default     = 3000
+}

@@ -26,3 +26,8 @@ variable "db_port" {
   type    = number
   default = 5432
 }
+
+variable "grafana_container_port" {
+  type    = number
+  default = 3000
+}

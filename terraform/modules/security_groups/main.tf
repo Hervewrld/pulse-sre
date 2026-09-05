@@ -77,10 +77,38 @@ resource "aws_security_group_rule" "checker_from_scheduler" {
   protocol                 = "tcp"
 }
 
+resource "aws_security_group" "grafana" {
+  name_prefix = "${var.name}-grafana-"
+  vpc_id      = var.vpc_id
+  description = "Pulse Grafana (Phase 11) - reachable only from the ALB"
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.name}-grafana" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "grafana_from_alb" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.grafana.id
+  source_security_group_id = var.alb_security_group_id
+  from_port                = var.grafana_container_port
+  to_port                  = var.grafana_container_port
+  protocol                 = "tcp"
+}
+
 resource "aws_security_group" "db" {
   name_prefix = "${var.name}-db-"
   vpc_id      = var.vpc_id
-  description = "Pulse Postgres - reachable only from the api, scheduler and checker services"
+  description = "Pulse Postgres - reachable only from the api, scheduler, checker and grafana services"
 
   egress {
     from_port   = 0
@@ -118,6 +146,15 @@ resource "aws_security_group_rule" "db_from_checker" {
   type                     = "ingress"
   security_group_id        = aws_security_group.db.id
   source_security_group_id = aws_security_group.checker.id
+  from_port                = var.db_port
+  to_port                  = var.db_port
+  protocol                 = "tcp"
+}
+
+resource "aws_security_group_rule" "db_from_grafana" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.db.id
+  source_security_group_id = aws_security_group.grafana.id
   from_port                = var.db_port
   to_port                  = var.db_port
   protocol                 = "tcp"

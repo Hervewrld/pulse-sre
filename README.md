@@ -22,9 +22,9 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 - [x] **Phase 6 — Deploy to AWS**: ECS task defs, Secrets Manager
 - [ ] **Phase 7 — CI/CD**: `.github/workflows/` (code complete - [PR #9](https://github.com/Hervewrld/pulse-sre/pull/9), not yet merged)
 - [x] **Phase 8 — Observability**: CloudWatch alarms/SNS/dashboard, Logs Insights, X-Ray (`terraform/modules/observability`)
-- [ ] **Phase 9 — Incident response**: `docs/postmortems/`
-- [ ] **Phase 10 — Security, DR, business continuity**
-- [ ] **Phase 11 — SLO burn-rate dashboard (production)**
+- [ ] **Phase 9 — Incident response**: `docs/postmortems/`, `scripts/chaos/` (drills built - [PR #11](https://github.com/Hervewrld/pulse-sre/pull/11), not yet merged; real postmortems still need writing after they're run)
+- [ ] **Phase 10 — Security, DR, business continuity**: least-privilege IAM/SGs (already in place), optional HTTPS, secrets rotation, `docs/disaster-recovery.md`, AZ-failure drill ([PR #12](https://github.com/Hervewrld/pulse-sre/pull/12), not yet merged)
+- [ ] **Phase 11 — SLO burn-rate dashboard (production)**: Grafana as a 4th ECS service sharing the ALB, one dashboard provisioned as code (`docker/grafana/`) running Phase 3's exact burn-rate math as SQL against production data
 - [ ] **Phase 12 — Optional: Kubernetes**: `k8s/base`, `k8s/helm`
 
 ## Local development
@@ -44,7 +44,9 @@ pulse/
 │   └── common/         # shared code: db models, config, logging setup
 ├── tests/
 ├── scripts/            # bash automation
+│   └── chaos/            # Phase 9/10 - deliberately break things, on purpose
 ├── docker/             # Dockerfiles + docker-compose
+│   └── grafana/           # Phase 11 - Grafana image, SLO dashboard provisioned as code
 ├── dashboard/           # simple status page (Phase 4)
 ├── terraform/
 │   ├── modules/
@@ -60,7 +62,7 @@ pulse/
 
 `monitoring/` is a leftover from the original scaffold's plan to hand-write Grafana
 JSON/Prometheus rules there - Phase 8 built infra-level monitoring (dashboard,
-alarms, Logs Insights queries) as Terraform instead (`terraform/modules/observability`,
-documented in `terraform/README.md`), so it's the source of truth and there's nothing
-for this directory to hold. Real Grafana is still coming in Phase 11, against
-production SLO data specifically - see `docs/roadmap.md`.
+alarms, Logs Insights queries) as Terraform instead (`terraform/modules/observability`),
+and Phase 11's actual Grafana dashboard is provisioned as code from `docker/grafana/`
+instead, so there's nothing left for this directory to hold - see `terraform/README.md`
+for both.

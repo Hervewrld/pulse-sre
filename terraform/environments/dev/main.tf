@@ -26,6 +26,7 @@ module "alb" {
   vpc_id            = module.vpc.vpc_id
   public_subnet_ids = module.vpc.public_subnet_ids
   target_port       = var.api_container_port
+  grafana_port      = var.grafana_container_port
 }
 
 module "security_groups" {
@@ -36,6 +37,7 @@ module "security_groups" {
   alb_security_group_id  = module.alb.alb_security_group_id
   api_container_port     = var.api_container_port
   checker_container_port = var.checker_container_port
+  grafana_container_port = var.grafana_container_port
 }
 
 module "ecs_cluster" {
@@ -77,6 +79,7 @@ module "iam" {
     api       = [module.rds.master_user_secret_arn]
     scheduler = [module.rds.master_user_secret_arn]
     checker   = [module.rds.master_user_secret_arn, module.secrets.secret_arns["slack_webhook_url"]]
+    grafana   = [module.rds.master_user_secret_arn]
   }
 }
 
@@ -194,6 +197,44 @@ module "ecs_service_scheduler" {
   security_group_id = module.security_groups.scheduler_security_group_id
 }
 
+module "ecs_service_grafana" {
+  source = "../../modules/ecs_service"
+
+  depends_on = [module.iam]
+
+  name         = "grafana"
+  project_name = var.name
+  region       = var.region
+  cluster_id   = module.ecs_cluster.cluster_id
+
+  image          = "${module.ecr.repository_urls["grafana"]}:${var.image_tag}"
+  container_port = var.grafana_container_port
+  # Same reasoning as scheduler's matching override above: without this, ECS's
+  # default 100/200 rolling deploy briefly runs two Grafana tasks - exactly
+  # the "two different instances randomly swapping in" problem desired_count=1
+  # further down is meant to avoid in the first place.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  execution_role_arn = module.iam.execution_role_arns["grafana"]
+  task_role_arn      = module.iam.task_role_arns["grafana"]
+  log_group_name     = module.iam.log_group_names["grafana"]
+
+  # DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (local.db_environment/db_secrets)
+  # are the exact env var names docker/grafana/entrypoint.sh reads to build
+  # its Postgres datasource - same names Pulse's own src/common/config.py
+  # uses, not a coincidence, just one fewer thing to keep in sync.
+  environment = concat(local.db_environment, [
+    { name = "GF_SERVER_ROOT_URL", value = "http://${module.alb.alb_dns_name}/grafana/" },
+    { name = "GF_SERVER_SERVE_FROM_SUB_PATH", value = "true" },
+  ])
+  secrets = local.db_secrets
+
+  subnet_ids        = module.vpc.private_subnet_ids
+  security_group_id = module.security_groups.grafana_security_group_id
+  target_group_arn  = module.alb.grafana_target_group_arn
+}
+
 module "observability" {
   source = "../../modules/observability"
 
@@ -207,6 +248,7 @@ module "observability" {
     api       = module.ecs_service_api.service_name
     scheduler = module.ecs_service_scheduler.service_name
     checker   = module.ecs_service_checker.service_name
+    grafana   = module.ecs_service_grafana.service_name
   }
   log_group_names        = module.iam.log_group_names
   db_instance_identifier = module.rds.identifier

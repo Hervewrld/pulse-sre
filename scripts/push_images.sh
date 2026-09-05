@@ -2,9 +2,11 @@
 #
 # push_images.sh <dev|prod>
 #
-# Builds the api/scheduler/checker image (one shared image, see docker/Dockerfile,
-# selected at runtime by the SERVICE env var) and pushes each to that environment's
-# ECR repository, tagged with the current git commit.
+# Builds api/scheduler/checker (one shared image, see docker/Dockerfile,
+# selected at runtime by the SERVICE env var) plus grafana (its own image,
+# docker/grafana/Dockerfile, with Pulse's SLO dashboard baked in - Phase 11)
+# and pushes each to that environment's ECR repository, tagged with the
+# current git commit.
 #
 # ECR repositories are IMMUTABLE (terraform/modules/ecr) - re-pushing an existing
 # tag fails on purpose, so every push needs a new tag. The commit SHA gives that
@@ -20,7 +22,7 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:?Usage: push_images.sh <dev|prod>}"
-SERVICES=(api scheduler checker)
+SERVICES=(api scheduler checker grafana)
 TF_DIR="terraform/environments/${ENVIRONMENT}"
 
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -55,7 +57,11 @@ for service in "${SERVICES[@]}"; do
   repo_url_var="REPO_URL_${service}"
   repo_url="${!repo_url_var}"
   echo "-- ${service}: ${repo_url}:${IMAGE_TAG}"
-  docker build -f docker/Dockerfile --build-arg SERVICE="${service}" -t "${repo_url}:${IMAGE_TAG}" .
+  if [[ "${service}" == "grafana" ]]; then
+    docker build -f docker/grafana/Dockerfile -t "${repo_url}:${IMAGE_TAG}" .
+  else
+    docker build -f docker/Dockerfile --build-arg SERVICE="${service}" -t "${repo_url}:${IMAGE_TAG}" .
+  fi
   docker push "${repo_url}:${IMAGE_TAG}"
 done
 

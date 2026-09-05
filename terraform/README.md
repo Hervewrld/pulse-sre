@@ -129,3 +129,50 @@ healthy.
 None of this has been run against real AWS from this session - no
 credentials/network here (see the main repo README) - so treat it as built
 and validated (`terraform validate`, not `plan`/`apply`), not yet exercised.
+
+## SLO dashboard (Phase 11)
+
+Grafana runs as a fourth ECS service (`module.ecs_service_grafana`),
+sharing the existing ALB instead of getting its own - reachable at
+`<alb_dns_name>/grafana/` (the `grafana_url` output). Its one dashboard
+("Pulse - SLO Burn Rate") is provisioned from `docker/grafana/dashboards/`,
+not clicked together in the UI - the exact same error-budget math as Phase
+3's `src/api/queries.py`, run as raw SQL directly against production
+`monitors`/`check_results`.
+
+`docker compose up grafana` (`docker/docker-compose.yml`) runs this whole
+image - build, entrypoint, provisioning, and all three panels' queries -
+against a real local Postgres, which is how the SQL, the datasource config,
+and the dashboard JSON were actually verified during development (through
+Grafana's own query API, not just read for syntax). Two real bugs only
+showed up this way and wouldn't have been caught by reading the Dockerfile:
+the base image's `grafana` user's group is `root`, not a group literally
+named `grafana` (`chown grafana:grafana` fails outright); and Grafana's
+Postgres datasource only accepts `disable`/`require`/`verify-ca`/
+`verify-full` for `sslmode`, not libpq's usual `prefer` - `DB_SSLMODE`
+(default `require`, overridden to `disable` for local's plain
+`postgres:16-alpine`) exists because of that.
+
+A few things worth knowing before pointing this at a real environment:
+
+- **Default login is `admin`/`admin`** - Grafana forces a password change on
+  first login, but there's no SSO/real auth provider wired up here. Fine for
+  a solo portfolio deployment, not for anything with more than one user.
+- **Grafana's own state doesn't persist.** It uses its default embedded
+  SQLite database for everything *except* the provisioned dashboard (users,
+  sessions, any panel someone builds by hand in the UI) - that file lives on
+  the Fargate task's ephemeral filesystem, gone on the next deploy or task
+  replacement. The one dashboard this phase actually delivers survives that
+  because it's provisioned from the image on every container start, not
+  because Grafana persisted it. A real persistent setup would put Grafana's
+  own state in Postgres too (`GF_DATABASE_TYPE=postgres` against a second
+  database on the same RDS instance) - not built here.
+- **One task, even in prod** - see the comment next to
+  `module.ecs_service_grafana` in `environments/prod/main.tf` for why two
+  replicas would actually be worse, not more resilient, given the state
+  story above.
+- The ALB path-based routing rule, and RDS's SSL behavior specifically
+  (`DB_SSLMODE` defaults to `require`, untested against a real RDS instance -
+  only against local plain Postgres), are the two pieces of this phase not
+  exercised from this session - no AWS credentials/network here (see the
+  main repo README).

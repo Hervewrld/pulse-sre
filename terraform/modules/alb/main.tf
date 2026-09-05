@@ -62,3 +62,47 @@ resource "aws_lb_listener" "http" {
     target_group_arn = aws_lb_target_group.api.arn
   }
 }
+
+# Grafana (Phase 11) shares this same ALB instead of getting its own -
+# path-based routing off the one public entrypoint this project already
+# pays for, rather than a second load balancer just for one more service.
+resource "aws_lb_target_group" "grafana" {
+  name        = "${var.name}-grafana"
+  port        = var.grafana_port
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    # Grafana's own built-in health endpoint - under /grafana, not /, because
+    # GF_SERVER_SERVE_FROM_SUB_PATH=true (environments/*/main.tf) makes
+    # Grafana serve everything under its root_url's path, including this,
+    # once the ALB is forwarding /grafana/* without stripping the prefix
+    # (see aws_lb_listener_rule.grafana's own comment on that).
+    path                = "/grafana/api/health"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    interval            = 30
+    timeout             = 5
+    matcher             = "200"
+  }
+}
+
+resource "aws_lb_listener_rule" "grafana" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.grafana.arn
+  }
+
+  condition {
+    path_pattern {
+      # ALB doesn't rewrite the path when forwarding - Grafana itself is
+      # configured (GF_SERVER_SERVE_FROM_SUB_PATH, environments/*/main.tf) to
+      # expect requests still carrying this prefix, not to have it stripped.
+      values = ["/grafana", "/grafana/*"]
+    }
+  }
+}

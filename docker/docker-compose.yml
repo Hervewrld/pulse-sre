@@ -79,5 +79,27 @@ services:
       checker:
         condition: service_started
 
+  # Phase 11's SLO burn-rate dashboard, provisioned from docker/grafana/dashboards/
+  # at container start - http://localhost:3000 (admin/admin), no ALB/sub-path
+  # config here (that's only needed once a reverse proxy is involved - see
+  # terraform/README.md), so this is the simplest way to actually see the
+  # dashboard render against real data before ever touching AWS.
+  grafana:
+    build:
+      context: ..
+      dockerfile: docker/grafana/Dockerfile
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: pulse
+      DB_USER: pulse
+      DB_PASSWORD: pulse
+      DB_SSLMODE: disable # local postgres:16-alpine has no SSL configured - RDS gets the entrypoint's own "require" default instead
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pulse-db-data:
