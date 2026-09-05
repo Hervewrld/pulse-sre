@@ -24,7 +24,7 @@ Full phase-by-phase plan: see `docs/roadmap.md`.
 - [x] **Phase 8 — Observability**: CloudWatch alarms/SNS/dashboard, Logs Insights, X-Ray (`terraform/modules/observability`)
 - [ ] **Phase 9 — Incident response**: `docs/postmortems/`, `scripts/chaos/` (drills built - [PR #11](https://github.com/Hervewrld/pulse-sre/pull/11), not yet merged; real postmortems still need writing after they're run)
 - [ ] **Phase 10 — Security, DR, business continuity**: least-privilege IAM/SGs (already in place), optional HTTPS, secrets rotation, `docs/disaster-recovery.md`, AZ-failure drill ([PR #12](https://github.com/Hervewrld/pulse-sre/pull/12), not yet merged)
-- [ ] **Phase 11 — SLO burn-rate dashboard (production)**: Grafana as a 4th ECS service sharing the ALB, one dashboard provisioned as code (`docker/grafana/`) running Phase 3's exact burn-rate math as SQL against production data
+- [ ] **Phase 11 — SLO burn-rate dashboard (production)**: Grafana as a 4th ECS service sharing the ALB, one dashboard provisioned as code (`docker/grafana/`) running Phase 3's exact burn-rate math as SQL against production data ([PR #13](https://github.com/Hervewrld/pulse-sre/pull/13), not yet merged; tested end-to-end locally, not yet run against real AWS)
 - [ ] **Phase 12 — Optional: Kubernetes**: `k8s/base`, `k8s/helm`
 
 ## Local development
